@@ -33,20 +33,25 @@ def main():
             return
 
     script_dir = os.path.dirname(__file__)
-    img_dir = os.path.join(script_dir, "figure/swd")
-    img_files = [f for f in os.listdir(img_dir) if f.lower().endswith(('.jpg', '.jpeg', '.png'))]
-
+    img_dir = os.path.join(script_dir, "figure")
+    img_files = []
+    for root, dirs, files in os.walk(img_dir):
+        for f in files:
+            if f.lower().endswith(('.jpg', '.jpeg', '.png')):
+                full_path = os.path.join(root, f)
+                rel_path = os.path.relpath(full_path, script_dir).replace("\\", "/")
+                img_files.append(rel_path)
+    
     SEXUAL_ROOTS = [
         "nipple", "pussy", "ass", "breast", "cameltoe", "thong", "slip",
         "see_through", "wet", "open", "lift", "sideboob", "underboob",
-        "garter", "cleavage", "bare", "micro", "highleg", "string",
-        "o_ring", "bondage", "leotard"
+        "garter", "cleavage", "bare", "micro", "highleg",
+        "o_ring", "bondage", "leotard", "crotch", "exposed", "panty"
     ]
-    
     
     results = []
     for img in img_files:
-        img_path = os.path.join(img_dir, img)
+        img_path = os.path.join(script_dir, img)
         general_tags, character_tags = get_pixai_tags(img_path, model_name='v0.9',thresholds={'general':0.6, 'character':0.6})
         if keep_list is not None:
             general_tags = [tag for tag in general_tags if any(root in tag.lower() for root in SEXUAL_ROOTS)]
@@ -54,7 +59,7 @@ def main():
         else:
             general_tags = [tag for tag in general_tags if any(root in tag.lower() for root in SEXUAL_ROOTS)]
         results.append({
-            "image": img,
+            "image": img,  # 记录的路径以 "figure/..." 开头
             "general_tags": general_tags,
             "character_tags": list(character_tags.keys())
         })

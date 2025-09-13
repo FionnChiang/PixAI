@@ -4,8 +4,9 @@ import sqlite3
 from flask import Flask, request, session, redirect, url_for, render_template_string
 
 # 设置 Flask 应用，静态文件目录为 figure 文件夹
-app = Flask(__name__, static_folder='figure', static_url_path='/figure')
+app = Flask(__name__, static_folder='/', static_url_path='/')
 app.secret_key = 'your_secret_key'  # 请更换为随机的密钥以提高安全性
+app.config['SESSION_TYPE'] = 'filesystem'
 
 DB_PATH = os.path.join(os.path.dirname(__file__), 'tags.db')
 
@@ -15,17 +16,49 @@ def regexp(expr, item):
         return False
     return re.search(expr, item.lower()) is not None
 
-def search_database(query, db_path=DB_PATH):
+def search_database(query, extra_query=None, operator="AND", db_path=DB_PATH):
     conn = sqlite3.connect(db_path)
-    # 注册 REGEXP 函数
     conn.create_function("REGEXP", 2, regexp)
     cursor = conn.cursor()
-    if query.lower() == 'ass':
-        # 使用正则 \bass\b 且排除包含 glasses 的 tag
-        cursor.execute("SELECT DISTINCT image FROM tags WHERE LOWER(tag) REGEXP ? AND LOWER(tag) NOT LIKE ?", ("\\bass\\b", "%glasses%"))
+    if extra_query and extra_query.strip():
+        if query.lower()=='ass' or extra_query.lower()=='ass':
+            if query.lower()=='ass' and extra_query.lower()=='ass':
+                cursor.execute("SELECT DISTINCT image FROM tags WHERE LOWER(tag) REGEXP ? AND LOWER(tag) NOT LIKE ?", ("\\bass\\b", "%glasses%"))
+            else:
+                # 判断哪个查询词是'ass'、哪个是其他查询词
+                if query.lower()=='ass':
+                    term_ass = query
+                    term_other = extra_query
+                else:
+                    term_ass = extra_query
+                    term_other = query
+                pattern_other = f"%{term_other}%"
+                cursor.execute("""
+                    SELECT image FROM tags
+                    WHERE ( (LOWER(tag) REGEXP ? AND LOWER(tag) NOT LIKE ?) OR tag LIKE ? )
+                    GROUP BY image
+                    HAVING SUM(CASE WHEN LOWER(tag) REGEXP ? AND LOWER(tag) NOT LIKE ? THEN 1 ELSE 0 END) > 0
+                       AND SUM(CASE WHEN tag LIKE ? THEN 1 ELSE 0 END) > 0
+                """, ("\\bass\\b", "%glasses%", pattern_other, "\\bass\\b", "%glasses%", pattern_other))
+        else:
+            pattern1 = f"%{query}%"
+            pattern2 = f"%{extra_query}%"
+            if operator.upper() == "AND":
+                cursor.execute("""
+                    SELECT image FROM tags
+                    WHERE tag LIKE ? OR tag LIKE ?
+                    GROUP BY image
+                    HAVING SUM(CASE WHEN tag LIKE ? THEN 1 ELSE 0 END) > 0
+                       AND SUM(CASE WHEN tag LIKE ? THEN 1 ELSE 0 END) > 0
+                """, (pattern1, pattern2, pattern1, pattern2))
+            else:
+                cursor.execute("SELECT DISTINCT image FROM tags WHERE tag LIKE ? OR tag LIKE ?", (pattern1, pattern2))
     else:
-        pattern = f"%{query}%"
-        cursor.execute("SELECT DISTINCT image FROM tags WHERE tag LIKE ?", (pattern,))
+         if query.lower() == 'ass':
+             cursor.execute("SELECT DISTINCT image FROM tags WHERE LOWER(tag) REGEXP ? AND LOWER(tag) NOT LIKE ?", ("\\bass\\b", "%glasses%"))
+         else:
+             pattern = f"%{query}%"
+             cursor.execute("SELECT DISTINCT image FROM tags WHERE tag LIKE ?", (pattern,))
     results = cursor.fetchall()
     conn.close()
     # 返回图片文件名列表
@@ -36,8 +69,10 @@ def search_database(query, db_path=DB_PATH):
 def index():
     if request.method == 'POST':
         query = request.form.get('query', '').strip()
+        query2 = request.form.get('query2', '').strip()
+        logic = request.form.get('logic', 'AND')
         if query:
-            results = search_database(query)
+            results = search_database(query, extra_query=query2, operator=logic)
             session['results'] = results
             session['query'] = query
             # 重定向到查看页面，从第一张开始
@@ -47,11 +82,25 @@ def index():
     <html>
       <head>
         <title>图片查询</title>
+        <script>
+          function toggleAdvanced() {
+            var adv = document.getElementById("advancedSearch");
+            adv.style.display = (adv.style.display === "none" ? "block" : "none");
+          }
+        </script>
       </head>
       <body>
         <h1>输入查询描述</h1>
         <form method="post">
           <input type="text" name="query" placeholder="请输入查询描述">
+          <button type="button" onclick="toggleAdvanced()">增加搜索关键词</button>
+          <div id="advancedSearch" style="display:none; margin-top:10px;">
+            <input type="text" name="query2" placeholder="请输入额外搜索描述">
+            <select name="logic">
+              <option value="AND">AND</option>
+              <option value="OR">OR</option>
+            </select>
+          </div>
           <input type="submit" value="查询">
         </form>
       </body>
@@ -73,7 +122,7 @@ def view_image():
     # 保证索引在合法范围内
     if index < 0: index = 0
     if index >= total: index = total - 1
-    image = "swd/" + results[index]
+    image = results[index]
     # 构造上一张和下一张按钮链接
     prev_index = index - 1 if index > 0 else 0
     next_index = index + 1 if index < total - 1 else total - 1
