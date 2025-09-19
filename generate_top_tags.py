@@ -2,7 +2,7 @@ import json
 from collections import Counter
 
 
-def generate_top_tags(input_file="tags_result.json", output_file="top20_tags.json", top_n=20):
+def generate_top_tags(input_file="tags_result.json", output_file="top30_tags.json", top_n=30):
     # 读取tags_result.json文件
     with open(input_file, "r", encoding="utf-8") as f:
         results = json.load(f)

@@ -56,19 +56,18 @@ def search_database(query, db_path="tags.db"):
 def main():
     db_path = "tags.db"
     # 如果数据库不存在则先创建
-    if not os.path.exists(db_path):
-        create_database(db_path=db_path)
+    create_database(db_path=db_path)
     
     print("数据库已就绪，可以进行模糊查询。")
-    while True:
-        query = input("请输入描述（直接回车退出）：").strip()
-        if not query:
-            break
-        images = search_database(query, db_path=db_path)
-        if images:
-            print("匹配到的图片：", images)
-        else:
-            print("未匹配到相关图片。")
+    # while True:
+    #     query = input("请输入描述（直接回车退出）：").strip()
+    #     if not query:
+    #         break
+    #     images = search_database(query, db_path=db_path)
+    #     if images:
+    #         print("匹配到的图片：", images)
+    #     else:
+    #         print("未匹配到相关图片。")
 
 
 if __name__ == "__main__":

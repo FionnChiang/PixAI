@@ -1,7 +1,9 @@
 import os
 import re
 import sqlite3
-from flask import Flask, request, session, redirect, url_for, render_template_string
+import random
+import json
+from flask import Flask, request, session, redirect, url_for, render_template_string, send_file
 
 # 设置 Flask 应用，静态文件目录为 figure 文件夹
 app = Flask(__name__, static_folder='/', static_url_path='/')
@@ -67,16 +69,28 @@ def search_database(query, extra_query=None, operator="AND", db_path=DB_PATH):
 # 首页，显示查询表单
 @app.route('/', methods=['GET', 'POST'])
 def index():
+    # 读取热门标签
+    top_tags = []
+    try:
+        top_tags_path = os.path.join(os.path.dirname(__file__), "top30_tags.json")
+        with open(top_tags_path, "r", encoding="utf-8") as f:
+            top_tags = json.load(f)
+    except Exception as e:
+        print(f"读取热门标签失败: {e}")
+    
     if request.method == 'POST':
         query = request.form.get('query', '').strip()
         query2 = request.form.get('query2', '').strip()
         logic = request.form.get('logic', 'AND')
+        # 判断是否要随机排序
+        random_order = request.form.get('random', '')
+        seed = ""
+        if random_order == '1':
+            # 生成随机种子
+            seed = random.randint(0, 10000000)
         if query:
-            results = search_database(query, extra_query=query2, operator=logic)
-            session['results'] = results
-            session['query'] = query
-            # 重定向到查看页面，从第一张开始
-            return redirect(url_for('view_image', index=0))
+            # 将 seed 作为参数传递
+            return redirect(url_for('view_image', query=query, query2=query2, logic=logic, index=0, seed=seed))
     return render_template_string('''
     <!doctype html>
     <html>
@@ -92,8 +106,8 @@ def index():
       <body>
         <h1>输入查询描述</h1>
         <form method="post">
-          <input type="text" name="query" placeholder="请输入查询描述">
-          <button type="button" onclick="toggleAdvanced()">增加搜索关键词</button>
+          <input type="text" name="query" placeholder="请输入查询描述"><br>
+          <button type="button" onclick="toggleAdvanced()">增加搜索关键词</button><br>
           <div id="advancedSearch" style="display:none; margin-top:10px;">
             <input type="text" name="query2" placeholder="请输入额外搜索描述">
             <select name="logic">
@@ -101,59 +115,168 @@ def index():
               <option value="OR">OR</option>
             </select>
           </div>
+          <div>
+            <label>
+              <input type="checkbox" name="random" value="1">
+              随机排序
+            </label>
+          </div>
           <input type="submit" value="查询">
         </form>
+        <hr>
+        <h2>当前热门Tag</h2>
+        <ul>
+          {% for tag in top_tags %}
+            <li>{{ tag }}</li>
+          {% endfor %}
+        </ul>
       </body>
     </html>
-    ''')
+    ''', top_tags=top_tags)
 
 # 显示图片页面，根据索引显示上一张或下一张
 @app.route('/view')
 def view_image():
-    results = session.get('results', [])
-    query = session.get('query', '')
+    query = request.args.get('query', '')
+    query2 = request.args.get('query2', '')
+    logic = request.args.get('logic', 'AND')
     try:
         index = int(request.args.get('index', 0))
     except ValueError:
         index = 0
+
+    # 根据查询参数重新获取结果数据
+    results = search_database(query, extra_query=query2, operator=logic) if query else []
+
+    # 如果存在 seed 参数，则基于种子进行确定性随机排序
+    seed_value = request.args.get('seed', '')
+    if seed_value:
+        try:
+            seed_int = int(seed_value)
+            r = random.Random(seed_int)
+            r.shuffle(results)
+        except Exception as e:
+            print(f"随机排序出错: {e}")
+
     total = len(results)
     if total == 0:
         return f'<p>未找到与 "{query}" 相关的图片。</p><p><a href="{url_for("index")}">返回查询</a></p>'
-    # 保证索引在合法范围内
-    if index < 0: index = 0
-    if index >= total: index = total - 1
+
+    # 限制索引范围
+    if index < 0:
+        index = 0
+    if index >= total:
+        index = total - 1
+
+    # 当前显示图片
     image = results[index]
-    # 构造上一张和下一张按钮链接
-    prev_index = index - 1 if index > 0 else 0
-    next_index = index + 1 if index < total - 1 else total - 1
+
+    # 将整个结果列表传给前端（前端控制切换效果）
     return render_template_string('''
     <!doctype html>
     <html>
       <head>
         <title>图片浏览</title>
+        <style>
+          #nav-buttons { text-align: center; margin-top: 20px; }
+          #nav-buttons button { margin: 0 10px; }
+          #current_count { margin-top: 10px; text-align: center; }
+          #img-container { display: flex; justify-content: center; align-items: center; margin: auto; width: 800px; height: 600px; border: 1px solid #ccc;}
+          #img-container img { max-width: 100%; max-height: 100%; object-fit: contain; }
+        </style>
       </head>
       <body>
-        <h1>查询结果：{{ query }}</h1>
-        <p>显示 {{ current + 1 }} / {{ total }} 张</p>
-        <div style="text-align:center; margin-top:20px;">
-          {% if current > 0 %}
-            <a href="{{ url_for('view_image', index=prev) }}">上一张</a>
-          {% endif %}
-          {% if current < total - 1 %}
-            <a href="{{ url_for('view_image', index=next) }}">下一张</a>
-          {% endif %}
+        <h1 style="text-align: center;">查询结果：{{ query }}</h1>
+        <div id="current_count" style="text-align: center;">{{ index + 1 }} / {{ total }}</div>
+        <div id="img-container">
+            <img id="current_image" src="{{ url_for('static', filename=image) }}" alt="Image">
         </div>
-        <div style="text-align:center; margin-top:20px;">
-          <a href="{{ url_for('index') }}">重新查询</a>
+        <div id="nav-buttons">
+          <button id="prevBtn" {% if index == 0 %}disabled{% endif %}>上一张</button>
+          <button id="nextBtn" {% if index == total - 1 %}disabled{% endif %}>下一张</button>
+          <button onclick="location.href='{{ url_for('index') }}'">重新查询</button>
+          <button id="downloadBtn">打包下载</button>
         </div>
-        <div style="width:800px; height:600px; border:1px solid #ccc; display:flex; justify-content:center; align-items:center; margin:auto;">
-          <img src="{{ url_for('static', filename=image) }}" alt="Image" style="max-width:100%; max-height:100%; object-fit:contain;">
-        </div>
-        
+        <!-- 添加一个隐藏的 iframe 用于触发下载 -->
+        <iframe id="downloadIframe" style="display:none;"></iframe>
+
+        <script>
+          // 后端传递的查询结果列表
+          var results = {{ results | tojson }};
+          var currentIndex = {{ index }};
+          var total = {{ total }};
+          // 静态目录根，相当于url_for('static', filename='')，末尾包含斜杠
+          var baseUrl = "{{ url_for('static', filename='') }}";
+          var bufferEnd = 0;
+          // 显示某一索引的图片
+          function showImage(idx) {
+            if (idx < 0) idx = 0;
+            if (idx >= total) idx = total - 1;
+            currentIndex = idx;
+            document.getElementById("current_image").src = baseUrl + results[idx];
+            document.getElementById("current_count").innerText = (currentIndex + 1) + " / " + total;
+            // 更新按钮状态
+            document.getElementById("prevBtn").disabled = (currentIndex === 0);
+            document.getElementById("nextBtn").disabled = (currentIndex === total - 1);
+            // 预加载后续最多16张图片
+            for (var i = bufferEnd + 1; i < Math.min(idx + 17, total); i++) {
+              var img = new Image();
+              img.src = baseUrl + results[i];
+            }
+            bufferEnd = Math.min(idx + 16, total - 1);
+          }
+
+          document.getElementById("prevBtn").addEventListener("click", function() {
+            showImage(currentIndex - 1);
+          });
+          document.getElementById("nextBtn").addEventListener("click", function() {
+            showImage(currentIndex + 1);
+          });
+
+          // 为“打包下载”按钮绑定点击事件，将请求发送给隐藏 iframe
+          document.getElementById("downloadBtn").addEventListener("click", function(){
+              var downloadUrl = "{{ url_for('download_zip', query=query, query2=query2, logic=logic, seed=seed) }}";
+              document.getElementById("downloadIframe").src = downloadUrl;
+          });
+        </script>
       </body>
     </html>
-    ''', query=query, image=image, current=index, total=total, prev=prev_index, next=next_index)
+    ''', query=query,query2=query2,logic=logic,seed=seed_value, image=image, index=index, total=total, results=results)
+
+# 下载 ZIP 包接口
+@app.route('/download_zip')
+def download_zip():
+    query = request.args.get('query', '')
+    query2 = request.args.get('query2', '')
+    logic = request.args.get('logic', 'AND')
+    seed_value = request.args.get('seed', '')
+    results = search_database(query, extra_query=query2, operator=logic) if query else []
+    # 如果存在 seed，则使用确定性随机排序
+    if seed_value:
+        try:
+            seed_int = int(seed_value)
+            r = random.Random(seed_int)
+            r.shuffle(results)
+        except Exception as e:
+            print(f"随机排序出错: {e}")
+    # 创建 zip 包
+    import zipfile, io
+    from datetime import datetime
+    memory_file = io.BytesIO()
+    with zipfile.ZipFile(memory_file, "w", zipfile.ZIP_DEFLATED) as zf:
+        script_dir = os.path.dirname(__file__)
+        for img in results:
+            file_path = os.path.join(script_dir, img)
+            if os.path.exists(file_path):
+                zf.write(file_path, arcname=os.path.basename(img))
+    memory_file.seek(0)
+    # 生成压缩包文件名：{tags}_{time}.zip
+    tag_str = query if query else "all"
+    if query2:
+        tag_str += "_" + query2
+    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    zip_filename = f"{tag_str}_{timestamp}.zip"
+    return send_file(memory_file, as_attachment=True, download_name=zip_filename)
 
 if __name__ == '__main__':
-    # 监听所有可用IP以方便局域网访问
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=5000, debug=False)
