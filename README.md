@@ -1,5 +1,5 @@
 # PixAI 项目
-
+文章使用的AI模型为PixAI(https://www.modelscope.cn/models/deepghs/pixai-tagger-v0.9-onnx)，该模型在本项目中基于ONNX Runtime GPU版本运行，支持CUDA加速。
 ## 项目概述
 本项目包含三个主要模块：
 - **web_app.py**：基于 Flask 的图片查询与浏览应用，可根据 tag 进行模糊或组合搜索。
