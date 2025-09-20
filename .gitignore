@@ -2,3 +2,4 @@ figure/
 /tags_result.json
 /tags.db
 /top30_tags.json
+.venv/
