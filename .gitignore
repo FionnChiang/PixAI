@@ -3,3 +3,4 @@ figure/
 /tags.db
 /top30_tags.json
 .venv/
+__pycache__/

@@ -3,7 +3,10 @@ import re
 import sqlite3
 import random
 import json
-from flask import Flask, request, session, redirect, url_for, render_template_string, send_file
+from flask import Flask, request, session, redirect, url_for, render_template_string, send_file, jsonify
+import folder_tagger
+import fuzzy_query_db
+import generate_top_tags
 
 # 设置 Flask 应用，静态文件目录为 figure 文件夹
 app = Flask(__name__, static_folder='/', static_url_path='/')
@@ -101,10 +104,21 @@ def index():
             var adv = document.getElementById("advancedSearch");
             adv.style.display = (adv.style.display === "none" ? "block" : "none");
           }
+          function updateTags() {
+            if (!confirm("确定要更新图片标签吗？")) return;
+            fetch('/update_tags', {method: 'POST'})
+              .then(resp => resp.json())
+              .then(data => {
+                alert(data.msg);
+                if (data.success) location.reload();
+              })
+              .catch(err => alert("更新失败: " + err));
+          }
         </script>
       </head>
       <body>
         <h1>输入查询描述</h1>
+        <button onclick="updateTags()">更新图片标签</button>
         <form method="post">
           <input type="text" name="query" placeholder="请输入查询描述"><br>
           <button type="button" onclick="toggleAdvanced()">增加搜索关键词</button><br>
@@ -277,6 +291,18 @@ def download_zip():
     timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
     zip_filename = f"{tag_str}_{timestamp}.zip"
     return send_file(memory_file, as_attachment=True, download_name=zip_filename)
+
+@app.route('/update_tags', methods=['POST'])
+def update_tags():
+    try:
+        # 只处理新增图片和删除已不存在图片的记录
+        folder_tagger.get_tags(full=False)
+        # 重新生成数据库和热门标签
+        fuzzy_query_db.create_database()
+        generate_top_tags.generate_top_tags()
+        return jsonify({'success': True, 'msg': '图片标签已更新！'})
+    except Exception as e:
+        return jsonify({'success': False, 'msg': f'更新失败: {e}'})
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=False)
